@@ -1,0 +1,189 @@
+#+title Emacs configuration
+
+* Startup Performance
+
+#+begin_src emacs-lisp
+
+  ;; -*- lexical-binding: t; -*-
+
+  ;; The default is 800 kilobytes.  Measured in bytes.
+  (setq gc-cons-threshold (* 50 1000 1000))
+
+  ;; Profile emacs startup
+  (add-hook 'emacs-startup-hook
+            (lambda ()
+              (message "*** Emacs loaded in %s seconds with %d garbage collections."
+                       (emacs-init-time "%.2f")
+                       gcs-done)))
+
+#+end_src
+
+* UI enchantements
+#+begin_src emacs-lisp -n 12 
+    (setq inhibit-startup-message t)
+    (scroll-bar-mode -1)        ; Disable visible scrollbar
+    (tool-bar-mode -1)          ; Disable the toolbar
+    (tooltip-mode -1)           ; Disable tooltips
+    (set-fringe-mode 10)       ; Give some breathing room
+    (menu-bar-mode -1)            ; Disable the menu bar
+    (setq initial-scratch-message "")
+    (display-battery-mode t)
+    (column-number-mode)
+    (global-display-line-numbers-mode t)
+    (dolist (mode '(org-mode-hook
+		    term-mode-hook
+		    shell-mode-hook
+		    eshell-mode-hook
+		    treemacs-mode-hook))
+      (add-hook mode (lambda () (display-line-numbers-mode 0))))
+    (cua-mode t)
+    (global-set-key (kbd "<escape>") 'keyboard-escape-quit)
+(global-set-key (kbd "s-<delete>") 'delete-window)
+(global-set-key (kbd "s-'") 'split-window-right)
+(global-set-key (kbd "s-/") 'split-window-below)
+
+  (if (daemonp)
+      (add-hook 'after-make-frame-functions (lambda (frame)
+					      (select-frame frame)
+					      (load-theme 'doom-nord t)))
+    (load-theme 'doom-nord t))
+  ;; Initialize package sources
+  (require 'package)
+
+  (setq package-archives '(("melpa" . "https://melpa.org/packages/")
+			   ("org" . "https://orgmode.org/elpa/")
+			   ("elpa" . "https://elpa.gnu.org/packages/")))
+
+  (package-initialize)
+  (unless package-archive-contents
+   (package-refresh-contents))
+
+  (require 'use-package)
+  (setq use-package-always-ensure t)
+
+#+end_src
+
+* doom modeline
+#+begin_src emacs-lisp
+(use-package doom-modeline
+  :ensure t
+  :init (doom-modeline-mode 1)
+  :custom ((doom-modeline-height 15)))
+
+#+end_src
+
+* All the icons
+
+#+begin_src emacs-lisp
+(add-hook 'dired-mode-hook 'all-the-icons-dired-mode)
+(add-hook 'ibuffer-mode-hook #'all-the-icons-ibuffer-mode)
+(all-the-icons-completion-mode)
+
+#+end_src
+
+* Org-mode
+
+#+begin_src emacs-lisp
+
+    (add-hook 'org-mode-hook (lambda () (org-superstar-mode 1)))
+    (setq org-superstar-headline-bullets-list '("◉" "○" "●" "○" "●" "○" "●"))
+    (setq org-ellipsis " ▾")
+    (setq org-pretty-entities t)
+    (setq org-hide-emphasis-markers t)
+    (setq org-modern-star nil)
+    (setq org-modern-hide-stars nil)
+  ;;  (global-org-modern-mode)
+  (org-babel-do-load-languages
+ 'org-babel-load-languages
+ '((emacs-lisp . t)
+   (css . t)))
+
+#+end_src
+
+* ivy
+#+begin_src emacs-lisp
+  (use-package ivy
+    :diminish
+    :bind (("C-s" . swiper)
+	   :map ivy-minibuffer-map
+	   ("TAB" . ivy-alt-done)
+	   ("C-l" . ivy-alt-done)
+	   ("C-j" . ivy-next-line)
+	   ("C-k" . ivy-previous-line)
+	   :map ivy-switch-buffer-map
+	   ("C-k" . ivy-previous-line)
+	   ("C-l" . ivy-done)
+	   ("C-d" . ivy-switch-buffer-kill)
+	   :map ivy-reverse-i-search-map
+	   ("C-k" . ivy-previous-line)
+	   ("C-d" . ivy-reverse-i-search-kill))
+    :config
+    (ivy-mode 1))
+
+  (use-package ivy-rich
+    :after ivy
+    :init
+    (ivy-rich-mode 1))
+
+  (use-package counsel
+    :bind (("C-M-j" . 'counsel-switch-buffer)
+	   :map minibuffer-local-map
+	   ("C-r" . 'counsel-minibuffer-history))
+    :custom
+    (counsel-linux-app-format-function #'counsel-linux-app-format-function-name-only)
+    :config
+    (counsel-mode 1))
+
+  (use-package ivy-prescient
+  :after counsel
+  :custom
+  (ivy-prescient-enable-filtering nil)
+  :config
+  ;; Uncomment the following line to have sorting remembered across sessions!
+  ;(prescient-persist-mode 1)
+  (ivy-prescient-mode 1))
+#+end_src
+
+* EXWM
+
+#+begin_src emacs-lisp
+    (setq exwm-input-global-keys
+	  `(
+	    ;; Reset to line-mode (C-c C-k switches to char-mode via exwm-input-release-keyboard)
+	    ([?\s-r] . exwm-reset)
+
+	    ;; Move between windows
+	    ([s-left] . windmove-left)
+	    ([s-right] . windmove-right)
+	    ([s-up] . windmove-up)
+	    ([s-down] . windmove-down)
+
+	    ;; Launch applications via shell command
+	    ([?\s-&] . (lambda (command)
+			 (interactive (list (read-shell-command "$ ")))
+			 (start-process-shell-command command nil command)))
+
+	    ;; Switch workspace
+	    ([?\s-w] . exwm-workspace-switch)
+	    ([?\s-`] . (lambda () (interactive) (exwm-workspace-switch-create 0)))
+  ;;	  ([?\s-delete] . delete-window)
+	    ;; 's-N': Switch to certain workspace with Super (Win) plus a number key (0 - 9)
+	    ,@(mapcar (lambda (i)
+			`(,(kbd (format "s-%d" i)) .
+			  (lambda ()
+			    (interactive)
+			    (exwm-workspace-switch-create ,i))))
+		      (number-sequence 0 9))))
+
+    ;;(exwm-enable)
+    ;;(eshell)
+   (exwm-input-set-key (kbd "<XF86MonBrightnessUp>")
+			  (lambda ()
+			    (interactive)
+			    (start-process-shell-command  "light -A 5" nil "light -A 5")))
+
+    ;;(exwm-enable)
+(add-to-list 'load-path "~/.emacs.d/elpa/sunrise")
+  (require 'sunrise)
+#+end_src
+
