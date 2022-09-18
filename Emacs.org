@@ -1,4 +1,4 @@
-#+title Emacs configuration
+#+title: Emacs configuration
 
 * Startup Performance
 
