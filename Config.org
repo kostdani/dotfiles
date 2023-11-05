@@ -1,0 +1,1001 @@
+* System
+** Boilerplate
+#+begin_src scheme :noweb-ref guix-modules
+  (guix gexp)
+#+end_src
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services)
+  (gnu packages)
+#+end_src  
+#+begin_src scheme :tangle system.scm :noweb yes
+  (use-modules
+   <<guix-modules>>
+   <<system-modules>>)
+  (operating-system
+   <<system-config>>
+   (packages (append (specifications->packages (list
+					       <<system-packages>>))
+		    %base-packages))
+   (services (list
+	      <<system-services>>)))
+#+end_src
+** Theming
+#+begin_src scheme :noweb-ref system-modules
+  (gnu packages fonts)
+#+end_src
+#+begin_src conf :tangle ~/.local/share/xfce4/terminal/colorschemes/nord.theme :mkdirp yes
+[Scheme]
+Name=Nord
+ColorCursor=#D8DEE9
+ColorForeground=#D8DEE9
+ColorBackground=#2E3440
+TabActivityColor=#88C0D0
+ColorPalette=#3B4252;#BF616A;#A3BE8C;#EBCB8B;#81A1C1;#B48EAD;#88C0D0;#E5E9F0;#4C566A;#BF616A;#A3BE8C;#EBCB8B;#81A1C1;#B48EAD;#8FBCBB;#ECEFF4
+ColorBold=#D8DEE9
+ColorBoldUseDefault=FALSE
+#+end_src
+#+begin_src scheme :noweb-ref nord-tty
+"\\e]P02E3440\\e]P1BF616A\\e]P2A3BE8C\\e]P3EBCB8B\\e]P481A1C1\\e]P5B48EAD\\e]P688C0D0\\e]P7E5E9F0\\e]P84C566A\\e]P9BF616A\\e]PAA3BE8C\\e]PBEBCB8B\\e]PCB48EAD\\e]PD8FBCBB\\e]PEECEFF4"
+#+end_src
+#+begin_src scheme :noweb-ref console-font
+  #~(string-append #+font-spleen:psf "/share/consolefonts/spleen-12x24.psfu")
+#+end_src
+** Base
+#+begin_src scheme :noweb-ref system-modules
+  (gnu packages base)
+  (gnu services base)
+#+end_src
+*** Terminal
+#+begin_src scheme :noweb-ref ttys
+  "tty1"
+  "tty2"
+  "tty3"
+  "tty4"
+  "tty5"
+  "tty6"
+#+end_src
+#+begin_src scheme :noweb-ref system-services :noweb yes :noweb-
+    (service login-service-type)
+    (service virtual-terminal-service-type)
+    (service console-font-service-type
+	     (map (lambda (tty)
+		    (cons tty
+			  <<console-font>>))
+		  '(
+		    <<ttys>>)))
+    (service syslog-service-type)
+    (service agetty-service-type (agetty-configuration
+				  (extra-options '("-L")) ; no carrier detect
+				  (term "vt100")
+				  (tty #f) ; automatic
+				  (shepherd-requirement '(syslogd)
+)))(service mingetty-service-type (mingetty-configuration (tty <<ttys>>)))
+#+end_src
+*** Network
+#+BEGIN_SRC scheme :noweb-ref system-modules
+  (gnu system nss)
+  (gnu services networking)
+#+END_SRC
+#+BEGIN_SRC scheme :noweb-ref system-config
+  (name-service-switch %mdns-host-lookup-nss)
+#+END_SRC
+#+BEGIN_SRC scheme :noweb-ref system-packages
+  "nss-certs"
+#+END_SRC  
+#+begin_src scheme :noweb-ref system-services
+  (service static-networking-service-type
+	   (list %loopback-static-networking))
+  ;(service dhcp-client-service-type)
+  (service urandom-seed-service-type)
+  (service nscd-service-type)
+  (service ntp-service-type)
+  (service guix-service-type (guix-configuration
+			      (substitute-urls
+			       (append (list "https://substitutes.nonguix.org")
+				       %default-substitute-urls))
+			      (authorized-keys
+			       (append (list 
+					(plain-file "non-guix.pub"
+						    "(public-key 
+							    (ecc 
+							       (curve Ed25519)
+							       (q #C1FD53E5D4CE971933EC50C9F307AE2171A2D3B52C804642A7A35F84F3A4EA98#)))"))
+				       %default-authorized-guix-keys))))
+  (service network-manager-service-type)
+  (service wpa-supplicant-service-type)    ;needed by NetworkManager
+  ;; (simple-service 'network-manager-applet
+  ;; 		profile-service-type
+  ;; 		(list network-manager-applet))
+  (service modem-manager-service-type)
+  (service usb-modeswitch-service-type)
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "netdev"
+#+end_src
+*** Logs
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services admin)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service rottlog-service-type)
+  (service log-cleanup-service-type
+                 (log-cleanup-configuration
+                  (directory "/var/log/guix/drvs")))
+#+end_src
+*** Udev
+#+begin_src scheme :noweb-ref system-modules
+  (gnu packages linux)
+  (gnu packages libusb)
+#+end_src
+#+BEGIN_SRC scheme :noweb-ref system-packages
+  "gvfs"
+#+END_SRC  
+#+begin_src scheme :noweb-ref system-services
+  (service udev-service-type
+	   (udev-configuration
+	    (rules (list lvm2 fuse alsa-utils crda))))
+  ;; Add udev rules for MTP devices so that non-root users can access
+  ;; them.
+  (simple-service 'mtp udev-service-type (list libmtp))
+
+  ;; Add udev rules for scanners.
+  (service sane-service-type)
+  ;; Add polkit rules, so that non-root users in the wheel group can
+  ;; perform administrative tasks (similar to "sudo").
+  polkit-wheel-service
+
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "wheel"
+#+end_src
+*** Sysctl
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services sysctl)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service sysctl-service-type)
+#+end_src
+*** Special files
+#+BEGIN_SRC scheme :noweb-ref system-modules
+  (gnu packages bash)
+  (gnu packages base)
+#+END_SRC
+#+BEGIN_SRC scheme :noweb-ref system-services
+  (service special-files-service-type
+	   `(("/bin/sh" ,(file-append bash "/bin/bash"))
+	     ("/bin/bash" ,(file-append bash "/bin/bash"))
+	     ("/usr/bin/env" ,(file-append coreutils "/bin/env"))))
+#+END_SRC
+*** SSH
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services ssh)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service openssh-service-type)
+#+end_src
+** Desktop
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services desktop)
+  (nongnu packages nvidia)
+  (nongnu services nvidia)
+  (gnu services xorg)
+  (gnu packages xorg)
+#+end_src
+*** Xorg
+#+begin_src scheme :noweb-ref system-services
+  ;(service x11-socket-directory-service-type)
+  (service xorg-server-service-type
+	     (xorg-configuration
+					  ;(keyboard-layout keyboard-layout)
+	      (extra-config (list "## avoid glamor that prevent nvidia driver to load correctly
+Section \"Module\"
+	Load \"glamoregl\"
+EndSection
+
+## ABI config
+Section \"ServerLayout\"
+   Identifier \"layout\"
+   Screen 0 \"intel_screen\"
+   Option \"AllowNVIDIAGPUScreens\"
+EndSection
+
+Section \"Device\"
+ Identifier \"intel\"
+ Driver \"modesetting\"
+EndSection
+
+Section \"Screen\"
+  Identifier \"intel_screen\"
+  Device \"intel\"
+EndSection
+
+Section \"Device\"
+  Identifier \"nvidia\"
+  Driver \"nvidia\"
+  BusID \"PCI:1:0:0\"
+EndSection
+
+Section \"Screen\"
+  Identifier \"nvidia_screen\"
+  Device \"nvidia\"
+EndSection
+"))
+	      (modules (cons* nvidia-driver %default-xorg-modules))
+	      (server (replace-mesa xorg-server))
+	      (drivers '("nvidia"))))
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "video"
+#+end_src
+#+begin_src scheme :noweb-ref home-packages
+  "xhost"
+  "xinit"
+  "sx"
+  "libglvnd"
+  "alsa-utils"
+  "brightnessctl"
+  "scrot"
+  "slock"
+  "upower"
+  "tlp"
+#+end_src
+#+begin_src sh :tangle ~/.config/sx/sxrc :mkdirp yes :tangle-mode o777
+exwm
+  #xhost +
+  #exec dbus-launch --exit-with-session emacs
+#+end_src
+*** Audio
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services sound)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service pulseaudio-service-type)
+  (service alsa-service-type)
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "audio"
+#+end_src
+*** Dbus
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services dbus)
+  (gnu services avahi)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service avahi-service-type)
+  (service udisks-service-type)
+  (service upower-service-type)
+  (service accountsservice-service-type)
+  (service cups-pk-helper-service-type)
+  (service colord-service-type)
+  (service geoclue-service-type)
+  (service polkit-service-type)
+  (service elogind-service-type)
+  (service dbus-root-service-type)
+#+end_src
+#+begin_src scheme :noweb-ref home-packages
+  "dbus"
+#+end_src
+*** GDM
+#+begin_src scheme :noweb-ref system-modules
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  ;(service gdm-service-type)
+  ;; This is a volatile read-write file system mounted at /var/lib/gdm,
+  ;; to avoid GDM stale cache and permission issues.
+  ;gdm-file-system-service
+  
+#+end_src
+*** Screen locker
+Screen lockers are a pretty useful thing and these are small.
+#+begin_src scheme :noweb-ref system-modules
+  (gnu packages suckless)
+  (gnu packages xdisorg)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service screen-locker-service-type
+	   (screen-locker-configuration
+	    (name "slock")
+	    (program (file-append slock "/bin/slock"))))
+  (service screen-locker-service-type
+	   (screen-locker-configuration
+	    (name "xlock")
+	    (program (file-append xlockmore "/bin/xlock"))))
+#+end_src
+*** Bluetooth
+#+begin_src scheme :noweb-ref system-modules
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service bluetooth-service-type
+	   (bluetooth-configuration
+	    (name "mi")
+	    (auto-enable? #t)))
+#+end_src
+*** Virtualization
+#+begin_src scheme :noweb-ref system-modules
+(gnu services virtualization)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service libvirt-service-type
+	   (libvirt-configuration
+	    (unix-sock-group "libvirt")
+	    (tls-port "16555")))
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "libvirt"
+#+end_src
+*** Docker
+#+begin_src scheme :noweb-ref system-modules
+  (gnu services docker)
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service docker-service-type)
+#+end_src
+#+begin_src scheme :noweb-ref user-roles
+  "docker"
+#+end_src
+*** Fontconfig
+The global fontconfig cache directory can sometimes contain
+stale entries, possibly referencing fonts that have been GC'd,
+so mount it read-only.
+#+begin_src scheme :noweb-ref system-modules
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  fontconfig-file-system-service
+#+end_src
+*** Desktop
+#+begin_src scheme :noweb-ref system-modules
+#+end_src
+#+begin_src scheme :noweb-ref system-services
+  (service xfce-desktop-service-type)
+  
+#+end_src
+** Kernel
+#+begin_src scheme :noweb-ref system-modules
+  (nongnu packages linux)
+  (nongnu system linux-initrd)
+#+end_src
+#+begin_src scheme :noweb-ref system-config 
+  (kernel linux-lts)
+  (initrd microcode-initrd)
+  (firmware (list linux-firmware))
+  (kernel-arguments (cons* 
+		     "modprobe.blacklist=nouveau"
+		     ;"resume=/swap/swapfile"
+		     ;"resume_offset=35206054"
+		     %default-kernel-arguments))
+
+  (kernel-loadable-modules (list nvidia-module))
+  
+#+end_src
+** Bootloader
+#+begin_src scheme :noweb-ref system-modules
+  (gnu bootloader)
+  (gnu bootloader grub)
+#+end_src
+#+BEGIN_SRC scheme :noweb-ref system-config
+  (bootloader (bootloader-configuration
+	       (bootloader grub-efi-bootloader)
+	       (targets '("/boot/efi"))))
+#+END_SRC
+** Filesystems
+#+begin_src scheme :noweb-ref system-modules
+  (gnu system file-systems)
+#+end_src
+#+begin_src scheme :noweb-ref system-config :noweb yes
+  (file-systems (append (list
+			 <<file-systems>>)
+			%base-file-systems))
+  (swap-devices (list
+		 <<swap-devices>>))
+#+end_src
+*** Root
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@root")
+   (mount-point "/")
+   (type "btrfs"))
+#+end_src
+*** Home
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@home")
+   (mount-point "/home")
+   (type "btrfs"))
+#+end_src
+*** Store
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@gnu")
+   (mount-point "/gnu")
+   (type "btrfs"))
+#+end_src
+*** Log
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@log")
+   (mount-point "/var/log")
+   (type "btrfs"))
+#+end_src
+*** Cache
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@cache")
+   (mount-point "/var/cache")
+   (type "btrfs"))
+#+end_src
+*** EFI
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p1")
+   (mount-point "/boot/efi")
+   (type "vfat"))
+#+end_src
+*** tmp
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (mount-point "/tmp")
+   (device "none")
+   (type "tmpfs")
+   (check? #f))
+#+end_src
+*** Swap
+#+begin_src scheme :noweb-ref file-systems
+  (file-system
+   (device "/dev/nvme0n1p2")
+   (options "subvol=@swap")
+   (mount-point "/swap")
+   (type "btrfs"))
+#+end_src
+#+begin_src scheme :noweb-ref swap-devices
+  (swap-space
+   (target "/swap/swapfile")
+   (dependencies (filter (file-system-mount-point-predicate "/swap")
+			 file-systems)))
+#+end_src
+** Users
+#+begin_src scheme :noweb-ref system-modules
+  (gnu packages shells)
+#+end_src  
+#+begin_src scheme :noweb-ref system-config :noweb yes
+  (users (cons*
+	  <<users>>
+	  %base-user-accounts))
+#+end_src
+*** kostdani
+#+begin_src scheme :noweb-ref users :noweb yes
+  (user-account
+   (name "kostdani")
+   (shell (file-append zsh "/bin/zsh"))
+   (password (crypt "pass" "$6$abc"))
+   (group "users")
+   (supplementary-groups (list
+			  <<user-roles>>)))
+#+end_src
+*** hrkcz001
+#+begin_src scheme :noweb-ref users
+  (user-account
+   (name "hrkcz001")
+   (shell (file-append neovim "/bin/nvim"))
+   (group "users"))
+#+end_src
+** Host info
+#+BEGIN_SRC scheme :noweb-ref system-modules
+  (gnu system keyboard)
+#+END_SRC
+#+BEGIN_SRC scheme :noweb-ref system-config
+  (host-name "mi")
+  (timezone "Europe/Prague")
+  (locale "en_US.utf8")
+  (keyboard-layout (keyboard-layout "us"))
+#+END_SRC
+* Home
+** Boilerplate
+#+begin_src scheme :noweb-ref home-modules 
+  (gnu home)
+  (gnu packages)
+  (gnu packages emacs)
+  (gnu services)
+  (guix gexp)
+  (guix channels)
+  (gnu home services)
+  (gnu home services shells)
+  (gnu home services shepherd)
+  (gnu home services guix)
+  (gnu home services desktop)
+#+end_src
+#+begin_src scheme :tangle home.scm :noweb yes
+  (use-modules
+   <<home-modules>>)
+  (home-environment
+   <<home-config>>)
+#+end_src
+** Packages
+#+begin_src scheme :noweb-ref home-config :noweb yes
+  (packages (specifications->packages (list
+				       <<home-packages>>)))
+#+end_src
+*** Kitty
+#+begin_src scheme :noweb-ref home-packages
+  "sx"
+  "i3-wm"
+  "kitty"
+#+end_src
+*** Fonts
+#+begin_src scheme :noweb-ref home-packages
+   "font-microsoft-arial"
+   "font-cormorant"
+   "font-microsoft-times-new-roman"
+   "font-fira-code"
+   "font-nerd-fonts"
+#+end_src
+*** Web
+#+begin_src scheme :noweb-ref home-packages
+   "git"
+   "curl"
+   ;"telegram-desktop"
+   "ungoogled-chromium"
+   "icecat"
+   "nyxt"
+#+end_src
+*** Containers
+#+begin_src scheme :noweb-ref home-packages
+   "flatpak"
+   "docker"
+   "virt-manager"
+   "gnome-boxes"
+#+end_src
+*** Wine
+#+begin_src scheme :noweb-ref home-packages
+   "wine"
+   "wine64"
+   "winetricks"
+   "playonlinux"
+#+end_src
+*** Theming
+#+begin_src scheme :noweb-ref home-packages
+  "nordic-theme"
+#+end_src
+** Services
+#+begin_src scheme :noweb-ref home-config :noweb yes
+  (services (list
+	     <<home-services>>))
+#+end_src
+*** Channels
+#+begin_src scheme :noweb-ref home-services
+  (simple-service 'variant-packages-service
+                   home-channels-service-type
+                   (list
+                    (channel
+		     (name 'k-channel)
+		     (url "https://github.com/kostdani/k-channel"))
+		    (channel
+		     (name 'nonguix)
+		     (url "https://gitlab.com/nonguix/nonguix")
+		     ;; Enable signature verification:
+		     (introduction
+		      (make-channel-introduction
+		       "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
+		       (openpgp-fingerprint
+			"2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
+		    (channel
+		     (name 'guix-gaming-games)
+		     (url "https://gitlab.com/guix-gaming-channels/games.git")
+		     ;; Enable signature verification:
+		     (introduction
+		      (make-channel-introduction
+		       "c23d64f1b8cc086659f8781b27ab6c7314c5cca5"
+		       (openpgp-fingerprint
+			"50F3 3E2E 5B0C 3D90 0424  ABE8 9BDC F497 A4BB CC7F"))))))
+#+end_src
+*** Shell
+#+begin_src bash :tangle dotfiles/.bashrc
+  # Bash initialization for interactive non-login shells and
+  # for remote shells (info "(bash) Bash Startup Files").
+
+  # Export 'SHELL' to child processes.  Programs such as 'screen'
+  # honor it and otherwise use /bin/sh.
+  export SHELL
+
+  if [[ $- != *i* ]]
+  then
+      # We are being invoked from a non-interactive shell.  If this
+      # is an SSH session (as in "ssh host command"), source
+      # /etc/profile so we get PATH and other essential variables.
+      [[ -n "$SSH_CLIENT" ]] && source /etc/profile
+
+      # Don't do anything else.
+      return
+  fi
+
+  # Source the system-wide file.
+  [ -f /etc/bashrc ] && source /etc/bashrc
+
+  alias ls='ls -p --color=auto'
+  alias ll='ls -l'
+  alias grep='grep --color=auto'
+#+end_src
+#+begin_src bash :tangle dotfiles/.bash_profile
+  # Set up Guix Home profile
+  if [ -f ~/.profile ]; then . ~/.profile; fi
+
+  # Honor per-interactive-shell startup file
+  if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
+
+  # Merge search-paths from multiple profiles, the order matters.
+  eval "$(guix package --search-paths \
+  -p $HOME/.config/guix/current \
+  -p $HOME/.guix-profile \
+  -p /run/current-system/profile)"
+
+  # Prepend setuid programs.
+  export PATH=/run/setuid-programs:$PATH
+#+end_src
+#+begin_src sh :tangle dotfiles/.zshrc
+  # If you come from bash you might have to change your $PATH.
+  # export PATH=$HOME/bin:/usr/local/bin:$PATH
+
+  # Path to your oh-my-zsh installation.
+  export ZSH="$HOME/.oh-my-zsh"
+
+  # Set name of the theme to load --- if set to "random", it will
+  # load a random theme each time oh-my-zsh is loaded, in which case,
+  # to know which specific one was loaded, run: echo $RANDOM_THEME
+  # See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
+  ZSH_THEME="robbyrussell"
+
+  # Set list of themes to pick from when loading at random
+  # Setting this variable when ZSH_THEME=random will cause zsh to load
+  # a theme from this variable instead of looking in $ZSH/themes/
+  # If set to an empty array, this variable will have no effect.
+  # ZSH_THEME_RANDOM_CANDIDATES=( "robbyrussell" "agnoster" )
+
+  # Uncomment the following line to use case-sensitive completion.
+  # CASE_SENSITIVE="true"
+
+  # Uncomment the following line to use hyphen-insensitive completion.
+  # Case-sensitive completion must be off. _ and - will be interchangeable.
+  # HYPHEN_INSENSITIVE="true"
+
+  # Uncomment one of the following lines to change the auto-update behavior
+  # zstyle ':omz:update' mode disabled  # disable automatic updates
+  # zstyle ':omz:update' mode auto      # update automatically without asking
+  # zstyle ':omz:update' mode reminder  # just remind me to update when it's time
+
+  # Uncomment the following line to change how often to auto-update (in days).
+  # zstyle ':omz:update' frequency 13
+
+  # Uncomment the following line if pasting URLs and other text is messed up.
+  # DISABLE_MAGIC_FUNCTIONS="true"
+
+  # Uncomment the following line to disable colors in ls.
+  # DISABLE_LS_COLORS="true"
+
+  # Uncomment the following line to disable auto-setting terminal title.
+  # DISABLE_AUTO_TITLE="true"
+
+  # Uncomment the following line to enable command auto-correction.
+  # ENABLE_CORRECTION="true"
+
+  # Uncomment the following line to display red dots whilst waiting for completion.
+  # You can also set it to another string to have that shown instead of the default red dots.
+  # e.g. COMPLETION_WAITING_DOTS="%F{yellow}waiting...%f"
+  # Caution: this setting can cause issues with multiline prompts in zsh < 5.7.1 (see #5765)
+  # COMPLETION_WAITING_DOTS="true"
+
+  # Uncomment the following line if you want to disable marking untracked files
+  # under VCS as dirty. This makes repository status check for large repositories
+  # much, much faster.
+  # DISABLE_UNTRACKED_FILES_DIRTY="true"
+
+  # Uncomment the following line if you want to change the command execution time
+  # stamp shown in the history command output.
+  # You can set one of the optional three formats:
+  # "mm/dd/yyyy"|"dd.mm.yyyy"|"yyyy-mm-dd"
+  # or set a custom format using the strftime function format specifications,
+  # see 'man strftime' for details.
+  # HIST_STAMPS="mm/dd/yyyy"
+
+  # Would you like to use another custom folder than $ZSH/custom?
+  # ZSH_CUSTOM=/path/to/new-custom-folder
+
+  # Which plugins would you like to load?
+  # Standard plugins can be found in $ZSH/plugins/
+  # Custom plugins may be added to $ZSH_CUSTOM/plugins/
+  # Example format: plugins=(rails git textmate ruby lighthouse)
+  # Add wisely, as too many plugins slow down shell startup.
+  plugins=(git)
+
+  source $ZSH/oh-my-zsh.sh
+
+  # User configuration
+
+  # export MANPATH="/usr/local/man:$MANPATH"
+
+  # You may need to manually set your language environment
+  # export LANG=en_US.UTF-8
+
+  # Preferred editor for local and remote sessions
+  # if [[ -n $SSH_CONNECTION ]]; then
+  #   export EDITOR='vim'
+  # else
+  #   export EDITOR='mvim'
+  # fi
+
+  # Compilation flags
+  # export ARCHFLAGS="-arch x86_64"
+
+  # Set personal aliases, overriding those provided by oh-my-zsh libs,
+  # plugins, and themes. Aliases can be placed here, though oh-my-zsh
+  # users are encouraged to define aliases within the ZSH_CUSTOM folder.
+  # For a full list of active aliases, run `alias`.
+  #
+  # Example aliases
+  # alias zshconfig="mate ~/.zshrc"
+  # alias ohmyzsh="mate ~/.oh-my-zsh"
+#+end_src
+#+begin_src sh :tangle dotfiles/.zprofile :noweb yes
+  # Merge search-paths from multiple profiles, the order matters.
+  eval "$(guix package --search-paths \
+	-p $HOME/.config/guix/current \
+	-p $HOME/.guix-profile \
+	-p $HOME/.guix-home/profile \
+	-p /run/current-system/profile)"
+
+  # Prepend setuid programs.
+  export PATH=/run/setuid-programs:$PATH
+
+  echo -en <<nord-tty>>
+      printf '\e[2J\e[H'
+
+alias e=emacsclient -a= -c
+#+end_src
+#+begin_src scheme :noweb-ref home-services
+  (service home-bash-service-type
+	   (home-bash-configuration
+	    (aliases '(("grep" . "grep --color=auto") ("ll" . "ls -l")
+		       ("ls" . "ls -p --color=auto")))
+	    (bashrc (list (local-file "dotfiles/.bashrc" "bashrc")))
+	    (bash-profile (list (local-file "dotfiles/.bash_profile"
+					    "bash_profile")))))
+  (service home-zsh-service-type
+	   (home-zsh-configuration
+	    (zshrc (list (local-file "dotfiles/.zshrc" "zshrc")))
+	    (zprofile (list (local-file "dotfiles/.zprofile"
+					"zprofile")))))
+  (simple-service 'nvidia-env-vars-service
+		  home-environment-variables-service-type
+		  `(("__NV_PRIME_RENDER_OFFLOAD" . "1")
+		    ("__GLX_VENDOR_LIBRARY_NAME" . "nvidia")))
+#+end_src
+*** Emacs
+#+begin_src elisp :tangle dotfiles/init.el
+  (org-babel-load-file "~/Config/Emacs.org")
+#+end_src
+#+begin_src scheme :noweb-ref home-services
+  (simple-service 'init-el
+		  home-files-service-type
+		  `((".emacs.d/init.el" ,(local-file "dotfiles/init.el"))))
+  
+#+end_src
+* Emacs
+#+begin_src scheme :noweb-ref home-packages
+  "emacs"
+  "emacs-perspective"
+  "emacs-magit"
+  "emacs-guix"
+  "emacs-bluetooth"
+  "emacs-transmission"
+  "emacs-slime"
+  "emacs-reverse-im"
+  "emacs-rainbow-mode"
+#+end_src
+** Startup performance
+#+begin_src emacs-lisp :tangle Emacs.el
+  ;; -*- lexical-binding: t; -*-
+  ;; The default is 800 kilobytes.  Measured in bytes.
+  (setq gc-cons-threshold (* 50 1000 1000))
+  ;; Profile emacs startup
+  (add-hook 'emacs-startup-hook
+	    (lambda ()
+	      (message "*** Emacs loaded in %s seconds with %d garbage collections."
+		       (emacs-init-time "%.2f")
+		       gcs-done)))
+
+  (setq warning-minimum-level :emergency)
+#+end_src
+** UI Enhancements
+#+begin_src emacs-lisp :tangle Emacs.el
+  (setq inhibit-startup-message t)
+  (scroll-bar-mode -1)          ; Disable visible scrollbar
+  (tool-bar-mode -1)            ; Disable the toolbar
+  (tooltip-mode -1)             ; Disable tooltips
+  (set-fringe-mode 10)          ; Give some breathing room
+  (menu-bar-mode -1)            ; Disable the menu bar
+  (setq initial-scratch-message "")
+  ;(display-battery-mode t)
+  (column-number-mode)
+  (add-hook 'text-mode-hook 'display-line-numbers-mode)
+  (dolist (mode '(org-mode-hook
+		  term-mode-hook
+		  shell-mode-hook
+		  eshell-mode-hook
+		  treemacs-mode-hook))
+    (add-hook mode (lambda () (display-line-numbers-mode 0))))
+  (cua-mode t)
+  (global-set-key (kbd "<escape>") 'keyboard-escape-quit)
+  (global-set-key (kbd "s-<delete>") 'delete-window)
+  (global-set-key (kbd "s-'") 'split-window-right)
+  (global-set-key (kbd "s-/") 'split-window-below)
+  
+  ;(server-start)
+  ;(setq server-socket-dir "/home/kostdani/emacsserver")
+#+end_src
+** Disable backup/autosave files
+#+begin_src  emacs-lisp :tangle Emacs.el
+(setq make-backup-files        nil)
+(setq auto-save-default        nil)
+(setq auto-save-list-file-name nil) 
+#+end_src
+** Line wrapping
+#+begin_src  emacs-lisp :tangle Emacs.el
+(setq word-wrap          t) ;; переносить по словам
+(global-visual-line-mode t)
+#+end_src
+** Theme
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-doom-themes"
+  "emacs-all-the-icons"
+#+end_src
+#+begin_src emacs-lisp :tangle Emacs.el
+  (if (daemonp)
+      (add-hook 'after-make-frame-functions (lambda (frame)
+					      (select-frame frame)
+					      (load-theme 'doom-nord t)))
+    (load-theme 'doom-nord t))
+#+end_src
+** Doom Modeline
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-doom-modeline"
+#+end_src
+#+begin_src emacs-lisp :tangle Emacs.el
+  (doom-modeline-mode 1)
+#+end_src
+** Copilot
+#+begin_src scheme :noweb-ref home-packages 
+   "emacs-copilot"
+#+end_src
+#+begin_src elisp :tangle Emacs.el 
+  (require 'copilot)
+  (add-hook 'text-mode-hook 'copilot-mode)
+  (with-eval-after-load 'copilot
+    (define-key copilot-mode-map (kbd "C-<tab>") #'copilot-accept-completion-by-word)
+    (define-key copilot-mode-map (kbd "C-<iso-lefttab>") #'copilot-accept-completion)
+    (define-key copilot-mode-map (kbd "C-,") #'copilot-previous-completion)
+    (define-key copilot-mode-map (kbd "C-.") #'copilot-next-completion)
+    (define-key copilot-mode-map (kbd "C-/") #'copilot-panel-complete))
+#+end_src
+** Fira Code ligatures
+#+begin_src scheme :noweb-ref home-packages 
+   "emacs-ligature"
+#+end_src
+#+begin_src elisp :tangle Emacs.el
+  
+  (add-to-list 'default-frame-alist
+	     '(font . "Fira Code"))
+  (require 'ligature)
+  ;; Enable the www ligature in every possible major mode
+  (ligature-set-ligatures 't '("www"))
+  ;; Enable ligatures in programming modes                                                           
+  (ligature-set-ligatures 'prog-mode '("www" "**" "***" "**/" "*>" "*/" "\\\\" "\\\\\\" "{-" "::"
+				       ":::" ":=" "!!" "!=" "!==" "-}" "----" "-->" "->" "->>"
+				       "-<" "-<<" "-~" "#{" "#[" "##" "###" "####" "#(" "#?" "#_"
+				       "#_(" ".-" ".=" ".." "..<" "..." "?=" "??" ";;" "/*" "/**"
+				       "/=" "/==" "/>" "//" "///" "&&" "||" "||=" "|=" "|>" "^=" "$>"
+				       "++" "+++" "+>" "=:=" "==" "===" "==>" "=>" "=>>" "<="
+				       "=<<" "=/=" ">-" ">=" ">=>" ">>" ">>-" ">>=" ">>>" "<*"
+				       "<*>" "<|" "<|>" "<$" "<$>" "<!--" "<-" "<--" "<->" "<+"
+				       "<+>" "<=" "<==" "<=>" "<=<" "<>" "<<" "<<-" "<<=" "<<<"
+				       "<~" "<~~" "</" "</>" "~@" "~-" "~>" "~~" "~~>" "%%"))
+  (global-ligature-mode 't)
+#+end_src
+** Telega
+#+begin_src scheme :noweb-ref home-packages 
+   "emacs-telega"
+#+end_src
+** Guix
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-guix"
+#+end_src
+** Magit
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-magit"
+#+end_src
+** Neotree
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-neotree"
+#+end_src
+#+begin_src elisp :tangle Emacs.el
+  (setq neo-theme (if (display-graphic-p) 'icons 'arrow))
+#+end_src
+** Language Server Protocol
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-lsp-mode"
+  "emacs-lsp-ui"
+  "emacs-company-lsp"
+  "emacs-lsp-treemacs"
+#+end_src
+** Flycheck
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-flycheck"
+#+end_src
+#+begin_src elisp :tangle Emacs.el
+  (add-hook 'prog-mode-hook 'flycheck-mode)
+#+end_src
+** Company
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-company"
+#+end_src
+#+begin_src elisp :tangle Emacs.el
+  (add-hook 'after-init-hook 'global-company-mode)
+#+end_src
+** EXWM
+#+begin_src scheme :noweb-ref home-packages 
+  "emacs-desktop-environment"
+  "emacs-exwm"
+#+end_src
+#+begin_src elisp :tangle ~/.exwm
+  ;; Set up global key bindings.  These always work, no matter the input state!
+    ;; Keep in mind that changing this list after EXWM initializes has no effect.
+    (setq exwm-input-global-keys
+	  `(
+	    ;; Reset to line-mode (C-c C-k switches to char-mode via exwm-input-release-keyboard)
+	    ([?\s-r] . exwm-reset)
+
+	    ;; Move between windows
+	    ([s-left] . windmove-left)
+	    ([s-right] . windmove-right)
+	    ([s-up] . windmove-up)
+	    ([s-down] . windmove-down)
+	    ;; split windows with ctrl and arrors
+
+
+
+	    ;; Launch applications via shell command
+	    (,(kbd "s-e") . (lambda (command)
+			      (interactive (list (read-shell-command "$ ")))
+			      (start-process-shell-command command nil command)))
+
+	    (,(kbd "s-<return>") . (lambda ()
+				      (interactive)
+				      (start-process-shell-command "alacritty" nil "alacritty")))
+
+
+	    ;; Switch workspace
+	    ([?\s-w] . exwm-workspace-switch)
+
+	    ;; kill x window
+	    ([?\s-q] . (lambda ()
+			 (interactive)
+			 (start-process-shell-command "kill-window" nil "xkill")))
+
+	    ;; 's-N': Switch to certain workspace with Super (Win) plus a number key (0 - 9)
+	    ,@(mapcar (lambda (i)
+			`(,(kbd (format "s-%d" i)) .
+			  (lambda ()
+			    (interactive)
+			    (exwm-workspace-switch-create ,(- i 1)))))
+		      (number-sequence 1 9))))
+
+	    ;; 
+
+
+    (exwm-enable)
+
+  (start-process-shell-command "polybar" nil "polybar")
+  (desktop-environment-mode)
+#+end_src
